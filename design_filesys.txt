@@ -1,0 +1,326 @@
+                    +-------------------------+
+                    |           CS 439        |
+                    | PROJECT 4: FILE SYSTEMS |
+                    |      DESIGN DOCUMENT    |
+                    +-------------------------+
+
+
+The questions in this design document should reflect the design of the code you 
+wrote for the project.   Your grade will reflect both the quality of your 
+answer in this document and the quality of the design implementation in your 
+code.  You may receive partial credit for answering questions for parts of 
+the project that you did not get to implement, but you must indicate in your 
+answer that there is no corresponding implementation, or you will not receive 
+any credit.
+
+
+For each question, you should include both the name of the file(s), function 
+name(s), and the line numbers where the relevant code may be found.
+
+
+These design documents will be completed and submitted as a group.  Please use 
+this document as a guide for design and discuss the questions and their 
+potential answers prior to beginning implementation.
+
+
+When you have completed your design document, submit it to the Canvas 
+assignment Project 4 Design and Documentation.   
+
+
+***Your submission must be a text file and each line must not extend past 80 
+characters.  In addition, your submission must contain all of the original 
+material and not exceed 18,000 characters.  The character count will be 
+measured using the Linux command wc.  (Note that rtf files are NOT text files.)
+
+
+---- Team Information  ----
+
+
+>> Fill your names, UT EIDs, CS logins, email addresses, and unique numbers:
+
+
+Name: Arkady Marchenko
+EID: asm5379
+CS login: arkady
+Email: asm5379@my.utexas.edu
+Unique Number: 54890
+
+Name: Matthew Pham
+EID: map7578
+CS login: mattpham
+Email: mattpham016@gmail.com 
+Unique Number: 54885
+
+Name: Alexander Nguyen
+EID: ALN2284 
+CS login: ALN2284
+Email: Alexandernguyen1504@gmail.com
+Unique Number: 54895
+
+
+Slip days used on this project: 0
+
+
+
+
+---- PRELIMINARIES ----
+
+
+>> If you have any preliminary comments on your submission or notes for the
+>> TAs, give them here.
+>>
+
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+>>
+
+
+>> Please paste a link to your GitLab repo below.
+>>  https://gitlab-fall25.cs.utexas.edu/arkady/439-p4.git
+
+
+
+                     INDEXED AND EXTENSIBLE FILES
+                     ============================
+
+
+---- DATA STRUCTURES ----
+
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', â€˜#defineâ€™, or
+>> enumeration that was necessary for your indexed and extensible file
+>> implementation.  Identify the purpose of each in 25 words or less.
+>>
+#define DIR_CNT 123
+- Number of direct block pointers in inode_disk
+#define PTRS_PER_SECTOR 128
+- Pointers per sector for indirect blocks
+#define MAX_FILE_SIZE 8388608
+- Maximum file size limit 8 MB
+struct inode_disk {
+  block_sector_t direct[DIR_CNT]; Array of direct block sector pointers
+  block_sector_t singly_indirect; Sector pointer to singly indirect block
+  block_sector_t doubly_indirect; Sector pointer to doubly indirect block
+  bool is_directory; Flag indicating if inode is a directory
+}
+
+struct lock open_inodes_lock; for inode synchonization
+
+struct inode{
+    ....
+    ....
+    struct lock inode_lock; for inode synchronization
+}
+static block_sector_t byte_to_sector_allocate(struct inode *, off_t);
+- Allocates sectors on-demand during writes
+void free_sectors(struct inode_disk *);
+- Frees all data blocks associated with inode
+void zero_sectors(struct inode_disk *);
+- Zeroes out all data blocks of inode
+
+
+>> A2: What is the maximum size of a file supported by your inode
+>> structure?  Show your work.
+>>
+Maximum file size calculation
+Direct blocks: 123 sectors * 512 bytes = 63024 bytes
+Singly indirect: 128 sectors * 512 bytes = 65536 bytes
+Doubly indirect: 128 * 128 sectors * 512 bytes = 8388608 bytes
+Total: 63024 + 65536 + 8388608 = 8517168 bytes
+
+---- SYNCHRONIZATION ----
+
+
+>> A3: Explain how your code avoids a race if two processes attempt to
+>> extend a file at the same time.
+>>
+
+We prevent a race by requiring a process that wishes to extend a File
+to hold that inode's lock in order to do so.
+
+
+>> A4: Suppose processes A and B both have file F open, both
+>> positioned at end-of-file.  If A reads and B writes F at the same
+>> time, A may read all, part, or none of what B writes.  However, A
+>> may not read data other than what B writes, e.g. if B writes
+>> nonzero data, A is not allowed to see all zeros.  Explain how your
+>> code avoids this race.
+>>
+
+Whenever we begin reading data from an inode -- we truncate the read to only
+go up to the file length at the read time. This way, we prevent any garbage data from being read.
+
+
+
+>> A5: Explain how your synchronization design provides "fairness".
+>> File access is "fair" if readers cannot indefinitely block writers
+>> or vice versa.  That is, one or many processes reading from a file
+>> cannot forever prevent another process from writing to the file, and
+>> one or many processes writing to a file cannot forever prevent
+>> another process from reading the file.
+>>
+
+We provide fairness by not blocking during reads and not blocking
+when writing within the bounds of the file. When extending the file,
+we block only for other threads that are currently attempting to extend
+the file as well.
+
+
+
+
+---- RATIONALE ----
+
+
+>> A6: Is your file layout a multilevel indexed structure?  If so, why
+>> did you choose this particular combination of direct, indirect, and
+>> doubly indirect blocks?  If not, why did you choose an alternative
+>> file structure, and what advantages and disadvantages does your
+>> structure have, compared to a multilevel index?
+>> In your explanation, include at least two reasons to support your 
+>> choices.
+>>
+- yes, our file layout is a multilevel indexed structure with 123 direct blocks, 1 singly indirect block,
+and 1 doubly indirect block
+- one reason we chose this is because 123 direct blocks are good for small files by avoiding indirect block lookups
+reducing disk I/O
+- also the single-level indirect block (128 pointers) handles medium files efficiently, while the
+doubly indirect block supports large files without requiring a third level of indirection
+- this keeps the inode structure simple and limiting metadata overhead
+
+
+
+                            SUBDIRECTORIES
+                            ==============
+
+
+---- DATA STRUCTURES ----
+
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', â€˜#defineâ€™, or
+>> enumeration that was necessary for your subdirectory 
+>> implementation.  Identify the purpose of each in 25 words or less.
+>>
+struct inode_disk {
+  bool is_directory; Flag marking inode as directory vs regular file
+}
+struct dir {
+    ...
+    struct lock dir_lock; for directory synchonization
+}
+
+struct thread {
+  ...
+  struct dir *cwd; Current working directory pointer
+}
+bool inode_is_dir(struct inode *);
+- Checks if inode represents a directory
+bool inode_is_root(struct inode *);
+ -Checks if inode is root directory
+bool inode_in_use(struct inode *);
+- Checks if inode has multiple open references
+
+struct lock free_map_lock; for free map synchronization
+
+
+---- ALGORITHMS ----
+
+
+>> B2: Describe your code for traversing a user-specified path.  How
+>> do traversals of absolute and relative paths differ?
+>>
+- path traversal is implemented in get_directory_filename()
+- for absolute paths, we start at root via dir_open_root(). For relative paths, we start from the current working
+directory via dir_reopen(cwd)
+- we tokenize the path by '/' using strtok_r()
+- for each token, if it's '.', we stay in current directory; if '..', we lookup parent via dir_lookup(cur_dir, "..", &parent_inode)
+otherwise we lookup the token and verify it's a directory
+- the last token becomes the filename. The function then ultimately returns the directory and stores the filename
+- sets filename[0]='\0' if path ends with '/'
+
+
+---- SYNCHRONIZATION ----
+
+
+>> B3: How do you prevent races on directory entries?  For example,
+>> only one of two simultaneous attempts to remove a single file
+>> should succeed, as should only one of two simultaneous attempts to
+>> create a file with the same name, and so on.
+>>
+
+We require the process to hold a lock to perform add, remove, or read operations on
+directories. Regarding adds, if a file exists with that name already in the directory within the critical section,
+we don't add it again. And with deletes we verify that the file exists in the directory
+within the critical section.
+
+
+
+>> B4: Does your implementation allow a directory to be removed if it
+>> is open by a process or if it is in use as a process's current
+>> working directory?  If so, what happens to that process's future
+>> file system operations?  If thatâ€™s not allowed, how do you
+>> prevent it?
+>>
+- no, our implementation prevents directory removal if the directory is open or in use
+- in dir_remove() we check inode_in_use(inode) which returns true if open_cnt > 1
+- if the directory is in use, removal fails
+- we also prevent root removal and non-empty directory removal
+- if a directory is a process's cwd, it emains open, so open_cnt > 1, preventing removal
+- this ensures processes with open directory references can continue operating without accessing freed inodes
+
+
+
+
+---- RATIONALE ----
+
+
+>> B5: What type of variable/structure did you use to represent the 
+>> current directory of a process?   Why did you choose this 
+>> representation?  Give at least two reasons.
+>>
+- We use struct dir *cwd in the thread structure
+- This allows quick access to a process' current directory without having to re look it up from a path
+every time
+- Allows for easier cwd inheritance from parent to child. Child processes can 
+get a copy of the parent's cwd without losing reference to it
+
+
+
+
+                           SURVEY QUESTIONS
+                           ================
+
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the semester.
+
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+>>
+
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+>>
+
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+>>
+
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students in future quarters?
+>>
+
+
+>> Any other comments?
+>>
